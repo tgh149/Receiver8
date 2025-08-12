@@ -1,0 +1,25 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/**/*.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "api/index.py"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron?job=account_check",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron?job=clear_topics",
+      "schedule": "5 0 * * *"
+    }
+  ]
+}
