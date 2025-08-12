@@ -1,8 +1,8 @@
 # START OF FILE handlers/admin/financials.py
+# START OF FILE handlers/admin/financials.py
 import logging
 from enum import Enum, auto
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-# FIX: CommandHandler was missing from this import
 from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, filters, CallbackQueryHandler, CommandHandler
 from telegram.constants import ParseMode
 from datetime import datetime
@@ -11,7 +11,8 @@ import database
 from ..helpers import admin_required, escape_markdown, try_edit_message, create_pagination_keyboard
 
 logger = logging.getLogger(__name__)
-
+# ... (rest of the file is identical to your provided version, but I'll add the missing CommandHandler import)
+# (Your original file was correct here, just ensuring consistency)
 class State(Enum):
     GET_REJECTION_REASON = auto()
 
@@ -189,7 +190,6 @@ async def conv_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def get_conv_handler():
-    # This conversation is only for the rejection reason
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(handle_reject_start, pattern=r"^admin_reject_withdrawal:")],
         states={
@@ -207,4 +207,3 @@ def get_callback_handlers():
         CallbackQueryHandler(withdrawal_list_panel, pattern=r"^admin_finance_list_"),
         CallbackQueryHandler(handle_approve, pattern=r"^admin_approve_withdrawal:"),
     ]
-# END OF FILE handlers/admin/financials.py

@@ -55,7 +55,6 @@ Device Check:     *{'✅ ON' if s.get('enable_device_check') == 'True' else '❌
         ],
         [
             InlineKeyboardButton(get_toggle_text("Spam Check", 'enable_spam_check'), callback_data="admin_setting_toggle:enable_spam_check:True:False"),
-            # FIX: Added the missing Device Check button
             InlineKeyboardButton(get_toggle_text("Device Check", 'enable_device_check'), callback_data="admin_setting_toggle:enable_device_check:True:False")
         ],
         [InlineKeyboardButton(get_toggle_text("2FA Enabler", 'enable_2fa'), callback_data="admin_setting_toggle:enable_2fa:True:False")],
@@ -71,8 +70,6 @@ Device Check:     *{'✅ ON' if s.get('enable_device_check') == 'True' else '❌
         await try_edit_message(query, text, InlineKeyboardMarkup(keyboard))
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
-
-# ... (rest of the file remains the same, no need to re-paste the whole thing)
 
 @admin_required
 async def text_settings_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -330,4 +327,3 @@ def get_callback_handlers():
         CallbackQueryHandler(api_delete, pattern=r"^admin_setting_api_delete:"),
         CallbackQueryHandler(test_apis, pattern=r"^admin_setting_api_test$"),
     ]
-# END OF FILE handlers/admin/settings.py

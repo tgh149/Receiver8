@@ -82,10 +82,10 @@ async def admin_log_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     username = chat.username or f"ID:{admin_id}"
                     context.bot_data.setdefault('admin_usernames', {})[admin_id] = username
                  except Exception: username = f"ID:{admin_id}"
-            admin_name = f"@{escape_markdown(username)}"
+            admin_name = f"@{escape_markdown(username)}" if username else f"ID: {admin_id}"
             text += f"`{ts}`: {admin_name} -> *{escape_markdown(log['action'])}*\n"
             if log['details']:
-                text += f"  └─ _{escape_markdown(log['details'])}_\n"
+                text += f"  └─ _{escape_markdown(log['details'][:50])}_\n"
     keyboard = create_pagination_keyboard("admin_system_log", page, total, 15)
     keyboard.append([InlineKeyboardButton("⬅️ Back to System Menu", callback_data="admin_system_main")])
     await try_edit_message(query, text, InlineKeyboardMarkup(keyboard))
@@ -94,22 +94,30 @@ async def admin_log_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await context.bot.send_document(update.effective_chat.id, document=InputFile(database.DB_FILE, filename="bot.db"))
+    db_path = database.DB_FILE
+    if os.path.exists(db_path):
+        await context.bot.send_document(update.effective_chat.id, document=InputFile(db_path, filename="bot.db"))
+    else:
+        await update.effective_message.reply_text("Database file not found.")
 
 async def conv_starter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     parts = query.data.split(':')
     action = parts[1]
-    prompts = {'ADD_ADMIN_ID': ("Enter the Telegram ID of the new admin:", State.ADD_ADMIN_ID), 'REMOVE_ADMIN_ID': ("Enter the Telegram ID of the admin to remove:", State.REMOVE_ADMIN_ID), 'PURGE_USER_ID': ("🔥 Enter the User ID or @username of the user to *PURGE ALL DATA* for:", State.PURGE_USER_ID), 'FACTORY_RESET_CONFIRM': ("⚠️ *DANGER ZONE* ⚠️\n\nThis will *PERMANENTLY DELETE EVERYTHING*\\.\n\nType `I UNDERSTAND THE RISK, RESET ALL DATA` to proceed\\.", State.FACTORY_RESET_CONFIRM)}
+    prompts = {
+        'ADD_ADMIN_ID': ("Enter the Telegram ID of the new admin:", State.ADD_ADMIN_ID), 
+        'REMOVE_ADMIN_ID': ("Enter the Telegram ID of the admin to remove:", State.REMOVE_ADMIN_ID), 
+        'PURGE_USER_ID': ("🔥 Enter the User ID or @username of the user to *PURGE ALL DATA* for:", State.PURGE_USER_ID), 
+        'FACTORY_RESET_CONFIRM': ("⚠️ *DANGER ZONE* ⚠️\n\nThis will *PERMANENTLY DELETE EVERYTHING*\\.\n\nType `I UNDERSTAND THE RISK, RESET ALL DATA` to proceed\\.", State.FACTORY_RESET_CONFIRM)
+    }
     if action in prompts:
         prompt, state = prompts[action]
         if action == 'PURGE_USER_ID' and len(parts) > 2:
-            user_id = int(parts[2])
-            # FIX: Use the correct function search_user()
-            user = database.search_user(str(user_id))
+            user_id_str = parts[2]
+            user = database.search_user(user_id_str)
             if user:
-                context.user_data['purge_user_id'] = user_id
+                context.user_data['purge_user_id'] = user['telegram_id']
                 await try_edit_message(query, f"You are about to purge all data for @{escape_markdown(user.get('username'))} \\(`{user['telegram_id']}`\\)\\.\n\nThis is irreversible\\.\n\nType `PURGE` to confirm\\.", None)
                 return State.PURGE_CONFIRM
         await try_edit_message(query, f"{prompt}\n\nType /cancel to abort\\.", None)
@@ -180,9 +188,10 @@ async def handle_factory_reset(update: Update, context: ContextTypes.DEFAULT_TYP
             database.db_lock.acquire()
             if os.path.exists(database.DB_FILE): os.remove(database.DB_FILE)
             if os.path.exists(context.application.bot_data.get('scheduler_db_file', 'scheduler.sqlite')): os.remove(context.application.bot_data.get('scheduler_db_file', 'scheduler.sqlite'))
-            if os.path.exists('sessions'): shutil.rmtree('sessions')
+            if os.path.exists(context.bot_data.get("SESSIONS_DIR", "sessions")): shutil.rmtree(context.bot_data.get("SESSIONS_DIR", "sessions"))
+            if os.path.exists(context.bot_data.get("LOGS_DIR", "logs")): shutil.rmtree(context.bot_data.get("LOGS_DIR", "logs"))
             database.db_lock.release()
-            await msg.edit_text("✅ Reset complete\\. Please restart the bot process NOW to re\\-initialize the database\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            await msg.edit_text("✅ Reset complete\\. Please RESTART the bot process NOW to re\\-initialize\\.", parse_mode=ParseMode.MARKDOWN_V2)
         except Exception as e:
             await msg.edit_text(f"❌ An error occurred during reset: {e}\\. Manual intervention may be required\\.", parse_mode=ParseMode.MARKDOWN_V2)
             database.db_lock.release()
@@ -220,4 +229,3 @@ def get_callback_handlers():
         CallbackQueryHandler(admin_log_panel, pattern=r"^admin_system_log_"),
         CallbackQueryHandler(get_db, pattern=r"^admin_system_get_db$"),
     ]
-# END OF FILE handlers/admin/system.py

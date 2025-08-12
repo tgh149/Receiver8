@@ -6,11 +6,15 @@ python-telegram-bot==21.0.1
 # Library for automating user accounts (Telethon client)
 telethon==1.34.0
 
+# For scheduling tasks, like the account confirmation checks
+apscheduler==3.10.4
+
 # For rich, colorful logging in the console
 rich==13.7.1
 
-# Required for the web server on Vercel
-Flask==3.0.3
-
-# Required by APScheduler's SQLiteJobStore (can be kept or removed, Telethon might use it)
+# Required by APScheduler's SQLiteJobStore
 SQLAlchemy==2.0.29
+
+# For the keep-alive web server
+Flask==3.0.3
+# END OF FILE requirements.txt

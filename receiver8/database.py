@@ -8,18 +8,25 @@ from functools import wraps
 import os
 import re
 
+# --- MODIFIED: Import config and use its values ---
+from config import get_config
+
 logger = logging.getLogger(__name__)
 
-DB_FILE = os.path.abspath("bot.db")
+config = get_config()
+DB_FILE = config.DB_FILE
 db_lock = threading.Lock()
 
 def get_db_connection():
+    # Ensure the directory for the DB exists
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     conn = sqlite3.connect(DB_FILE, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
+# ... (rest of the file is unchanged, but included for completeness) ...
 def db_transaction(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -92,7 +99,27 @@ def init_db(conn):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_accounts_phone ON accounts (phone_number)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts (user_id)")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals (status)")
-    default_settings = {'api_id': '25707049', 'api_hash': '676a65f1f7028e4d969c628c73fbfccc', 'admin_channel': '@RAESUPPORT', 'support_id': str(6158106622), 'spambot_username': '@SpamBot', 'two_step_password': '123456', 'enable_spam_check': 'True', 'enable_device_check': 'False', 'enable_2fa': 'False', 'bot_status': 'ON', 'add_account_status': 'UNLOCKED', 'min_withdraw': '1.0', 'max_withdraw': '100.0', 'welcome_message': "🎉 Welcome to the Account Receiver Bot!\n\nTo add an account, simply send the phone number with the country code (e.g., `+12025550104`).\n\nUse the buttons below to navigate.", 'help_message': "🆘 Bot Help & Guide\n\n🔹 `/start` - Displays the main welcome message.\n🔹 `/balance` - Shows your detailed balance and allows withdrawal.\n🔹 `/rules` - View the bot's rules.\n🔹 `/cancel` - Stops any ongoing process you started.", 'rules_message': "📜 Bot Rules\n\n1. Do not use the same phone number multiple times.\n2. Any attempt to exploit or cheat the bot will result in a permanent ban without appeal.\n3. The administration is not responsible for any account limitations or issues that arise after a successful confirmation.", 'support_message': "If you need help, please describe your issue in a message below. Our support team will get back to you shortly."}
+    # Sensible defaults for a new deployment. Admin can change these via the panel.
+    initial_admin_id = get_config().INITIAL_ADMIN_ID
+    default_settings = {
+        'api_id': '25707049', 
+        'api_hash': '676a65f1f7028e4d969c628c73fbfccc', 
+        'admin_channel': '', 
+        'support_id': str(initial_admin_id) if initial_admin_id else '', 
+        'spambot_username': '@SpamBot', 
+        'two_step_password': '', 
+        'enable_spam_check': 'True', 
+        'enable_device_check': 'False', 
+        'enable_2fa': 'False', 
+        'bot_status': 'ON', 
+        'add_account_status': 'UNLOCKED', 
+        'min_withdraw': '1.0', 
+        'max_withdraw': '100.0', 
+        'welcome_message': "🎉 Welcome to the Account Receiver Bot!\n\nTo add an account, simply send the phone number with the country code (e.g., `+12025550104`).\n\nUse the buttons below to navigate.", 
+        'help_message': "🆘 Bot Help & Guide\n\n🔹 `/start` - Displays the main welcome message.\n🔹 `/balance` - Shows your detailed balance and allows withdrawal.\n🔹 `/rules` - View the bot's rules.\n🔹 `/cancel` - Stops any ongoing process you started.", 
+        'rules_message': "📜 Bot Rules\n\n1. Do not use the same phone number multiple times.\n2. Any attempt to exploit or cheat the bot will result in a permanent ban without appeal.\n3. The administration is not responsible for any account limitations or issues that arise after a successful confirmation.", 
+        'support_message': "If you need help, please describe your issue in a message below. Our support team will get back to you shortly."
+    }
     for key, value in default_settings.items():
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)", (key, value))
     if cursor.execute("SELECT COUNT(*) FROM countries").fetchone()[0] == 0:
@@ -111,7 +138,6 @@ def store_daily_topic(topic_name: str, topic_id: int):
     today = date.today()
     execute_query("INSERT OR IGNORE INTO daily_topics (topic_name, topic_id, date_created) VALUES (?, ?, ?)", (topic_name, topic_id, today))
 
-# --- NEW: Function to delete a stale topic record ---
 def delete_daily_topic(topic_name: str):
     """Deletes the topic record for today to allow for recreation."""
     today = date.today()
@@ -122,7 +148,6 @@ def clear_old_topics():
     count = execute_query("DELETE FROM daily_topics WHERE date_created < date('now', '-2 days')")
     if count > 0:
         logger.info(f"Cron job: Cleared {count} old daily topic records from the database.")
-# --- END NEW ---
 
 def get_withdrawal_by_id(withdrawal_id):
     return fetch_one("SELECT w.*, u.username FROM withdrawals w JOIN users u ON w.user_id = u.telegram_id WHERE w.id = ?", (withdrawal_id,))
@@ -252,6 +277,10 @@ def search_user(identifier):
         return fetch_one("SELECT * FROM users WHERE telegram_id = ?", (user_id,))
     except ValueError:
         return None
+def get_user_by_id(user_id: int):
+    """Gets a user by their numeric ID only."""
+    return fetch_one("SELECT * FROM users WHERE telegram_id = ?", (user_id,))
+
 
 def get_all_users(page=1, limit=10, filter_by='all'):
     offset = (page - 1) * limit
@@ -288,7 +317,7 @@ def log_admin_action(conn, admin_id, action, details=None):
 def get_admin_log(page=1, limit=20):
     offset = (page - 1) * limit
     total = fetch_one("SELECT COUNT(*) as c FROM admin_log")['c']
-    query = "SELECT l.*, a.telegram_id as admin_tid FROM admin_log l LEFT JOIN admins a ON l.admin_id = a.telegram_id ORDER BY l.timestamp DESC LIMIT ? OFFSET ?"
+    query = "SELECT l.*, u.username as admin_username FROM admin_log l LEFT JOIN users u ON l.admin_id = u.telegram_id ORDER BY l.timestamp DESC LIMIT ? OFFSET ?"
     logs = fetch_all(query, (limit, offset))
     return logs, total
 def get_setting(key, default=None): return (fetch_one("SELECT value FROM settings WHERE key = ?", (key,)) or {}).get('value', default)

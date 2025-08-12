@@ -2,7 +2,6 @@
 import logging
 from enum import Enum, auto
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-# FIX: CommandHandler was missing from this import
 from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, filters, CallbackQueryHandler, CommandHandler
 from telegram.constants import ParseMode
 import re
@@ -30,7 +29,6 @@ class State(Enum):
 async def country_main_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the main country management panel with a list of countries."""
     query = update.callback_query
-    # This can also be called from a message handler (e.g., after a conv cancel)
     if query:
         await query.answer()
 
@@ -43,7 +41,6 @@ async def country_main_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton(f"{data.get('flag','')} {data.get('name')}", callback_data=f"admin_country_view:{data['code']}")
             for data in sorted(countries.values(), key=lambda x: x['name'])
         ]
-        # Group buttons into rows of 2
         keyboard.extend([country_buttons[i:i + 2] for i in range(0, len(country_buttons), 2)])
 
     keyboard.append([
@@ -122,7 +119,6 @@ async def toggle_accept_restricted(update: Update, context: ContextTypes.DEFAULT
     database.log_admin_action(update.effective_user.id, "COUNTRY_EDIT", f"Toggled accept_restricted to {new_value} for {code}")
     context.bot_data['countries_config'] = database.get_countries_config() # Refresh cache
 
-    # Refresh the view
     await country_view_panel(update, context)
 
 # --- Conversation Handlers ---
@@ -143,7 +139,6 @@ async def conv_starter(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action in prompts:
         prompt, state = prompts[action]
-        # Pre-fill data for editing
         if action == 'EDIT_VALUE':
             context.user_data['edit_country_code'] = parts[2]
             context.user_data['edit_country_key'] = parts[3]
@@ -154,7 +149,6 @@ async def conv_starter(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return state
     return ConversationHandler.END
 
-# Add Country Flow
 async def handle_add_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = update.message.text.strip()
     if not re.match(r'^\+\d{1,4}$', code):
@@ -207,8 +201,7 @@ async def handle_add_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE
         c = context.user_data['new_country']
         database.add_country(c['code'], c['name'], c['flag'], c['time'], c['capacity'], c['price_ok'], c['price_restricted'])
         database.log_admin_action(update.effective_user.id, "COUNTRY_ADD", f"Added {c['name']} ({c['code']})")
-        context.bot_data['countries_config'] = database.get_countries_config() # Refresh cache
-
+        context.bot_data['countries_config'] = database.get_countries_config()
         await update.message.reply_text(f"✅ Country *{escape_markdown(c['name'])}* added successfully\\!", parse_mode=ParseMode.MARKDOWN_V2)
         await country_main_panel(update, context)
         context.user_data.clear()
@@ -217,23 +210,17 @@ async def handle_add_capacity(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("Invalid number\\. Please enter a number like `100` or `-1`\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return State.ADD_CAPACITY
 
-# Edit Country Flow
 async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = context.user_data['edit_country_key']
     code = context.user_data['edit_country_code']
     value = update.message.text.strip()
 
     try:
-        # Validate input based on key
-        if key in ['price_ok', 'price_restricted']:
-            value = float(value)
-        elif key in ['time', 'capacity']:
-            value = int(value)
-
+        if key in ['price_ok', 'price_restricted']: value = float(value)
+        elif key in ['time', 'capacity']: value = int(value)
         database.update_country_value(code, key, value)
         database.log_admin_action(update.effective_user.id, "COUNTRY_EDIT", f"Set {key}={value} for {code}")
-        context.bot_data['countries_config'] = database.get_countries_config() # Refresh cache
-
+        context.bot_data['countries_config'] = database.get_countries_config()
         await update.message.reply_text(f"✅ Setting *{escape_markdown(key)}* updated for `{escape_markdown(code)}`\\.", parse_mode=ParseMode.MARKDOWN_V2)
         await country_main_panel(update, context)
         context.user_data.clear()
@@ -242,14 +229,12 @@ async def handle_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid value for this setting\\. Please try again\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return State.EDIT_VALUE
 
-# Delete Country Flow
 async def handle_delete_code(update: Update, context: ContextTypes.DEFAULT_TYPE):
     code = update.message.text.strip()
     country = database.get_country_by_code(code)
     if not country:
         await update.message.reply_text("Country code not found\\. Please try again or /cancel\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return State.DELETE_CODE
-    
     context.user_data['delete_country_code'] = code
     await update.message.reply_text(f"You are about to delete *{escape_markdown(country['name'])}* \\(`{escape_markdown(code)}`\\)\\. This cannot be undone\\.\n\nType `CONFIRM` to proceed\\.", parse_mode=ParseMode.MARKDOWN_V2)
     return State.DELETE_CONFIRM
@@ -259,15 +244,13 @@ async def handle_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
         code = context.user_data['delete_country_code']
         database.delete_country(code)
         database.log_admin_action(update.effective_user.id, "COUNTRY_DELETE", f"Deleted {code}")
-        context.bot_data['countries_config'] = database.get_countries_config() # Refresh cache
+        context.bot_data['countries_config'] = database.get_countries_config()
         await update.message.reply_text(f"✅ Country `{escape_markdown(code)}` has been deleted\\.", parse_mode=ParseMode.MARKDOWN_V2)
     else:
         await update.message.reply_text("❌ Deletion cancelled\\.", parse_mode=ParseMode.MARKDOWN_V2)
-
     await country_main_panel(update, context)
     context.user_data.clear()
     return ConversationHandler.END
-
 
 async def conv_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -290,12 +273,9 @@ def get_conv_handler():
             State.DELETE_CODE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_delete_code)],
             State.DELETE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_delete_confirm)],
         },
-        fallbacks=[
-            CommandHandler('cancel', conv_cancel),
-        ],
+        fallbacks=[CommandHandler('cancel', conv_cancel)],
         map_to_parent={ ConversationHandler.END: ConversationHandler.END },
-        per_user=True, per_chat=True,
-        allow_reentry=True,
+        per_user=True, per_chat=True, allow_reentry=True,
     )
 
 def get_callback_handlers():
@@ -304,4 +284,3 @@ def get_callback_handlers():
         CallbackQueryHandler(country_view_panel, pattern=r"^admin_country_view:"),
         CallbackQueryHandler(toggle_accept_restricted, pattern=r"^admin_country_toggle_restricted:"),
     ]
-# END OF FILE handlers/admin/country_management.py

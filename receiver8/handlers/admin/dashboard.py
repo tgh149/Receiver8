@@ -61,14 +61,12 @@ async def stats_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = database.get_bot_stats()
     settings = context.bot_data
 
-    # User Analytics
     user_text = f"""
 🎯 *User Analytics*
   └─👥 Active Users: `{stats.get('total_users', 0) - stats.get('blocked_users', 0)}`
   └─🚫 Blocked Users: `{stats.get('blocked_users', 0)}`
     """
 
-    # Session Statistics
     status_counts = stats.get('accounts_by_status', {})
     session_text = f"""
 📈 *Session Statistics*
@@ -80,8 +78,6 @@ async def stats_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
   └─📦 Available to Export: `{stats.get('available_sessions', 0)}`
     """
 
-    # System Configuration
-    # FIX: Correctly escape minimum withdrawal which may contain a period.
     min_withdraw_str = escape_markdown(settings.get('min_withdraw', '1.0'))
     s_id_str = str(settings.get('support_id', 'Not Set'))
     support_id = escape_markdown(s_id_str if len(s_id_str) < 6 else f"{s_id_str[:4]}...{s_id_str[-2:]}")
@@ -107,5 +103,3 @@ async def stats_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await try_edit_message(query, full_text, reply_markup=reply_markup)
-
-# END OF FILE handlers/admin/dashboard.py

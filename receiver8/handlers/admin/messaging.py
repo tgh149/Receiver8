@@ -3,7 +3,7 @@ import logging
 import asyncio
 from enum import Enum, auto
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
-from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, filters, CallbackQueryHandler, CommandHandler
 from telegram.constants import ParseMode
 
 import database
@@ -24,7 +24,7 @@ class State(Enum):
 async def broadcast_main_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Displays the main broadcast and messaging dashboard."""
     query = update.callback_query
-    await query.answer()
+    if query: await query.answer()
 
     text = """
 📢 *Broadcast & Messaging*
@@ -35,10 +35,12 @@ Choose a tool to communicate with your users\\.
         [InlineKeyboardButton("🚀 New Mass Broadcast", callback_data="admin_broadcast_conv_start:MASS")],
         [InlineKeyboardButton("🎯 New Targeted Broadcast", callback_data="admin_broadcast_conv_start:TARGETED")],
         [InlineKeyboardButton("👤 Send to Single User", callback_data="admin_broadcast_conv_start:SINGLE")],
-        # [InlineKeyboardButton("📊 View Broadcast History", callback_data="admin_broadcast_history")], # Future
         [InlineKeyboardButton("⬅️ Back to Panel", callback_data="admin_panel")],
     ]
-    await try_edit_message(query, text, InlineKeyboardMarkup(keyboard))
+    if query:
+        await try_edit_message(query, text, InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
 
 
 # --- Conversation Handlers ---
@@ -56,8 +58,7 @@ async def conv_starter(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await try_edit_message(query, "👤 *Send to Single User*\n\nEnter the user's Telegram ID or @username\\.", None)
         return State.GET_TARGET_ID
     
-    # For MASS and TARGETED, start composition
-    await try_edit_message(query, "*Step 1: Message Content*\n\nSend the text for your message\\. You can use Markdown for formatting\\.", None)
+    await try_edit_message(query, "*Step 1: Message Content*\n\nSend the text for your message\\. You can use Markdown for formatting\\.\n\nType /cancel to abort.", None)
     return State.COMPOSE_BODY
 
 
@@ -86,6 +87,7 @@ async def handle_compose_body(update: Update, context: ContextTypes.DEFAULT_TYPE
         [InlineKeyboardButton("➡️ Skip & Preview", callback_data="broadcast_preview")],
     ]
     await update.message.reply_text("*Step 2: Add Media \\(Optional\\)*\n\nWould you like to add a photo to this message?", reply_markup=InlineKeyboardMarkup(keyboard))
+    return State.COMPOSE_PHOTO
 
 
 async def prompt_for_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,6 +110,7 @@ async def handle_compose_photo(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("➡️ Skip & Preview", callback_data="broadcast_preview")],
     ]
     await update.message.reply_text("*Step 3: Add Button \\(Optional\\)*\n\nWould you like to add a URL button below the message?", reply_markup=InlineKeyboardMarkup(keyboard))
+    return State.COMPOSE_BUTTON
 
 
 async def prompt_for_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,26 +137,28 @@ async def handle_compose_button(update: Update, context: ContextTypes.DEFAULT_TY
 async def show_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows the final preview of the broadcast message before sending."""
     query = update.callback_query
+    sender_message = query.message if query else update.message
     if query:
         await query.answer()
 
     broadcast = context.user_data['broadcast']
     
-    # Determine target audience
     if broadcast['mode'] == 'MASS':
         users = database.fetch_all("SELECT telegram_id FROM users WHERE is_blocked = 0")
         broadcast['user_ids'] = [u['telegram_id'] for u in users]
         target_desc = f"ALL active users \\(Approx\\. {len(broadcast['user_ids'])} users\\)"
     elif broadcast['mode'] == 'SINGLE':
-        user = database.get_user_by_id(broadcast['user_ids'][0])
+        user = database.search_user(str(broadcast['user_ids'][0]))
         target_desc = f"Single user: @{escape_markdown(user.get('username'))} \\(`{user['telegram_id']}`\\)"
     else: # TARGETED mode (future extension)
-        target_desc = "A targeted segment \\(feature coming soon\\)"
-        broadcast['user_ids'] = []
+        target_desc = "A targeted segment"
+        # For now, we'll just send to all as an example.
+        users = database.fetch_all("SELECT telegram_id FROM users WHERE is_blocked = 0")
+        broadcast['user_ids'] = [u['telegram_id'] for u in users]
+        target_desc += f" \\(Broadcasting to ALL {len(broadcast['user_ids'])} users for now\\)"
 
-    await (query.message if query else update.message).reply_text(f"✨ *Broadcast Preview* ✨\n\n*Target:* {target_desc}", parse_mode=ParseMode.MARKDOWN_V2)
+    await sender_message.reply_text(f"✨ *Broadcast Preview* ✨\n\n*Target:* {target_desc}", parse_mode=ParseMode.MARKDOWN_V2)
 
-    # Send the actual preview message
     text = broadcast['text']
     photo_id = broadcast['photo_id']
     button = broadcast['button']
@@ -163,16 +168,15 @@ async def show_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton(button[0], url=button[1])]])
 
     if photo_id:
-        await (query.message if query else update.message).reply_photo(photo=photo_id, caption=text, caption_parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
+        await sender_message.reply_photo(photo=photo_id, caption=text, caption_parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup)
     else:
-        await (query.message if query else update.message).reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup, disable_web_page_preview=True)
+        await sender_message.reply_text(text=text, parse_mode=ParseMode.MARKDOWN_V2, reply_markup=reply_markup, disable_web_page_preview=True)
 
-    # Confirmation
     confirm_keyboard = [
         [InlineKeyboardButton("✅ Confirm & Send", callback_data="broadcast_send")],
         [InlineKeyboardButton("❌ Cancel", callback_data="broadcast_cancel")],
     ]
-    await (query.message if query else update.message).reply_text("Is this correct?", reply_markup=InlineKeyboardMarkup(confirm_keyboard))
+    await sender_message.reply_text("Is this correct?", reply_markup=InlineKeyboardMarkup(confirm_keyboard))
     return State.CONFIRM
 
 
@@ -198,8 +202,7 @@ async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if button:
         reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton(button[0], url=button[1])]])
 
-    success_count = 0
-    fail_count = 0
+    success_count, fail_count = 0, 0
     
     for user_id in user_ids:
         try:
@@ -211,7 +214,7 @@ async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.warning(f"Broadcast failed for user {user_id}: {e}")
             fail_count += 1
-        await asyncio.sleep(0.05) # Rate limit: 20 messages per second
+        await asyncio.sleep(0.05)
 
     final_report = f"✅ *Broadcast Complete*\n\nSent: `{success_count}`\nFailed: `{fail_count}`"
     await context.bot.send_message(chat_id=update.effective_chat.id, text=final_report, parse_mode=ParseMode.MARKDOWN_V2)
@@ -222,11 +225,15 @@ async def execute_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def conv_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
-    context.user_data.clear()
-    await query.edit_message_text("❌ Broadcast cancelled\\.", parse_mode=ParseMode.MARKDOWN_V2)
-    return ConversationHandler.END
+    if query:
+        await query.answer()
+        await query.edit_message_text("❌ Broadcast cancelled\\.", parse_mode=ParseMode.MARKDOWN_V2)
+    else:
+        await update.message.reply_text("❌ Broadcast cancelled\\.", parse_mode=ParseMode.MARKDOWN_V2)
 
+    context.user_data.clear()
+    await broadcast_main_panel(update, context) # Show main menu again
+    return ConversationHandler.END
 
 def get_conv_handler():
     return ConversationHandler(
@@ -235,11 +242,9 @@ def get_conv_handler():
             State.GET_TARGET_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_get_target_id)],
             State.COMPOSE_BODY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_compose_body)],
             State.COMPOSE_PHOTO: [
-                CallbackQueryHandler(prompt_for_button, pattern=r"^broadcast_preview$"),
                 MessageHandler(filters.PHOTO, handle_compose_photo)
             ],
             State.COMPOSE_BUTTON: [
-                CallbackQueryHandler(show_preview, pattern=r"^broadcast_preview$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_compose_button)
             ],
             State.CONFIRM: [
@@ -252,6 +257,7 @@ def get_conv_handler():
             CallbackQueryHandler(prompt_for_button, pattern=r"^broadcast_add_button$"),
             CallbackQueryHandler(show_preview, pattern=r"^broadcast_preview$"),
             CallbackQueryHandler(conv_cancel, pattern=r"^broadcast_cancel$"),
+            CommandHandler('cancel', conv_cancel),
         ],
         map_to_parent={ ConversationHandler.END: ConversationHandler.END },
         per_user=True, per_chat=True,
@@ -261,4 +267,3 @@ def get_callback_handlers():
     return [
         CallbackQueryHandler(broadcast_main_panel, pattern=r"^admin_broadcast_main$"),
     ]
-# END OF FILE handlers/admin/messaging.py

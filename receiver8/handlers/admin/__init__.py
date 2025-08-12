@@ -27,14 +27,14 @@ def get_admin_handlers():
     all_conv_handlers_raw = [
         user_management.get_conv_handler(),
         country_management.get_conv_handler(),
-        financials.get_conv_handler(), # Added missing handler
+        financials.get_conv_handler(),
         messaging.get_conv_handler(),
         settings.get_conv_handler(),
         file_manager.get_conv_handler(),
         system.get_conv_handler(),
     ]
     
-    # FIX: Filter out any 'None' results from get_conv_handler() functions
+    # Filter out any 'None' results from get_conv_handler() functions
     all_conv_handlers = [h for h in all_conv_handlers_raw if h is not None]
 
     # Combine all callback query handlers
@@ -56,5 +56,3 @@ def get_admin_handlers():
         *all_conv_handlers,
         *all_callback_handlers,
     ]
-
-# END OF FILE handlers/admin/__init__.py

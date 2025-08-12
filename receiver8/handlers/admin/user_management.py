@@ -17,7 +17,6 @@ class State(Enum):
 @admin_required
 async def user_profile_card(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int):
     query = update.callback_query
-    # FIX: Use the correct function search_user()
     user = database.search_user(str(user_id))
     if not user:
         if query: await query.answer("User not found.", show_alert=True)
@@ -49,8 +48,7 @@ Joined: {escape_markdown(user['join_date'].split(' ')[0])}
     ]
     if query: await try_edit_message(query, text, InlineKeyboardMarkup(keyboard))
     else: await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
-#... (The rest of the file is correct and unchanged)
-#... (I will include it for completeness)
+
 @admin_required
 async def users_main_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -128,10 +126,13 @@ async def conv_starter(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     parts = query.data.split(':')
     action = parts[1]
-    prompts = {'GET_USER_ID': ("🔍 Enter User ID or @username to search:", State.GET_USER_ID), 'ADJUST_BALANCE_ID': ("💰 Enter User ID to adjust balance for:", State.ADJUST_BALANCE_ID)}
+    prompts = {
+        'GET_USER_ID': ("🔍 Enter User ID or @username to search:", State.GET_USER_ID), 
+        'ADJUST_BALANCE_ID': ("💰 Enter User ID to adjust balance for:", State.ADJUST_BALANCE_ID)
+    }
     if action in prompts:
         prompt, state = prompts[action]
-        if len(parts) > 2:
+        if len(parts) > 2: # User ID is pre-filled from a button
             context.user_data['target_user_id'] = int(parts[2])
             await query.message.reply_text(f"Adjusting balance for user `{parts[2]}`\\. Please send the amount to add \\(negative to subtract\\)\\.", parse_mode=ParseMode.MARKDOWN_V2)
             return State.ADJUST_BALANCE_AMOUNT
@@ -150,18 +151,15 @@ async def handle_get_user_id(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def handle_adjust_balance_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        user_id = context.user_data.get('target_user_id')
-        if not user_id:
-            identifier = update.message.text.strip()
-            user_db = database.search_user(identifier)
-            if not user_db:
-                await update.message.reply_text("❌ User not found\\. Please try again or /cancel\\.", parse_mode=ParseMode.MARKDOWN_V2)
-                return State.ADJUST_BALANCE_ID
-            user_id = user_db['telegram_id']
-        user = database.search_user(str(user_id))
+        identifier = update.message.text.strip()
+        user_db = database.search_user(identifier)
+        if not user_db:
+            await update.message.reply_text("❌ User not found\\. Please try again or /cancel\\.", parse_mode=ParseMode.MARKDOWN_V2)
+            return State.ADJUST_BALANCE_ID
+        user_id = user_db['telegram_id']
         context.user_data['target_user_id'] = user_id
         _, balance, _, _, _ = database.get_user_balance_details(user_id)
-        await update.message.reply_text(f"User @{escape_markdown(user.get('username'))} has a balance of `${escape_markdown(f'{balance:.2f}')}`\\.\n\nEnter amount to add \\(use negative to subtract, e\\.g\\., `-5.50`\\)\\.", parse_mode=ParseMode.MARKDOWN_V2)
+        await update.message.reply_text(f"User @{escape_markdown(user_db.get('username'))} has a balance of `${escape_markdown(f'{balance:.2f}')}`\\.\n\nEnter amount to add \\(use negative to subtract, e\\.g\\., `-5.50`\\)\\.", parse_mode=ParseMode.MARKDOWN_V2)
         return State.ADJUST_BALANCE_AMOUNT
     except (ValueError, KeyError):
         await update.message.reply_text("Invalid ID\\. Please enter a numeric Telegram User ID or @username\\.", parse_mode=ParseMode.MARKDOWN_V2)
@@ -186,11 +184,7 @@ async def handle_adjust_balance_amount(update: Update, context: ContextTypes.DEF
 async def conv_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("✅ Operation cancelled\\.", parse_mode=ParseMode.MARKDOWN_V2)
-    class FakeQuery:
-        def __init__(self, message): self.message = message
-        async def answer(self, *args, **kwargs): pass
-        async def edit_message_text(self, *args, **kwargs): await self.message.reply_text(*args, **kwargs)
-    await users_main_panel(FakeQuery(update.message), context)
+    await users_main_panel(update, context)
     return ConversationHandler.END
 
 def get_conv_handler():
@@ -212,4 +206,3 @@ def get_callback_handlers():
         CallbackQueryHandler(user_list_panel, pattern=r"^admin_users_list_"),
         CallbackQueryHandler(toggle_block_user, pattern=r"^admin_user_toggle_block:"),
     ]
-# END OF FILE handlers/admin/user_management.py

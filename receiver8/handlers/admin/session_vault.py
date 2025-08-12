@@ -1,17 +1,18 @@
 # START OF FILE handlers/admin/session_vault.py
 import logging
-from enum import Enum, auto
+from datetime import datetime, timezone, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, ConversationHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import ContextTypes, CallbackQueryHandler
 from telegram.constants import ParseMode
 
 import database
+from config import get_config # For getting BOT_TOKEN
 from ..helpers import admin_required, escape_markdown, try_edit_message, create_advanced_pagination
 from .. import login # Import the login module to access the confirmation logic
 
 logger = logging.getLogger(__name__)
 
-# --- Main Panels ---
+# ... (main panels are the same) ...
 
 @admin_required
 async def session_vault_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -45,7 +46,6 @@ async def session_vault_main(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.MARKDOWN_V2)
 
-
 @admin_required
 async def country_status_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Shows session status categories for a selected country."""
@@ -62,7 +62,6 @@ async def country_status_panel(update: Update, context: ContextTypes.DEFAULT_TYP
     all_counts = database.fetch_all("SELECT status, COUNT(*) as count FROM accounts WHERE phone_number LIKE ? GROUP BY status", (f"{code}%",))
     counts = {s['status']: s['count'] for s in all_counts}
     
-    # --- NEW: Check for stuck sessions ---
     _, stuck_total = database.get_paginated_stuck_accounts_by_country(code, 1, 1)
 
     status_order = ['ok', 'restricted', 'pending_confirmation', 'limited', 'banned', 'error', 'withdrawn']
@@ -79,7 +78,6 @@ async def country_status_panel(update: Update, context: ContextTypes.DEFAULT_TYP
 
     keyboard.append([InlineKeyboardButton("⬅️ Back to Session Vault", callback_data="admin_sv_main")])
     await try_edit_message(query, text, InlineKeyboardMarkup(keyboard))
-
 
 @admin_required
 async def session_list_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,9 +102,9 @@ async def session_list_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if not sessions:
         text += "No sessions in this category\\."
     else:
-        from datetime import datetime
         for s in sessions:
-            reg_date = datetime.fromisoformat(s['reg_time']).strftime('%Y-%m-%d')
+            reg_date_dt = datetime.fromisoformat(s['reg_time']) if isinstance(s['reg_time'], str) else s['reg_time']
+            reg_date = reg_date_dt.strftime('%Y-%m-%d')
             text += f"📱 `{escape_markdown(s['phone_number'])}`\n"
             text += f"  ├─ User ID: `{s['user_id']}`\n"
             text += f"  └─ Added: `{escape_markdown(reg_date)}`\n"
@@ -116,8 +114,6 @@ async def session_list_panel(update: Update, context: ContextTypes.DEFAULT_TYPE)
     keyboard.append([InlineKeyboardButton("⬅️ Back", callback_data=f"admin_sv_country:{code}")])
     
     await try_edit_message(query, text, InlineKeyboardMarkup(keyboard))
-
-# --- NEW: Handlers for Stuck Sessions ---
 
 @admin_required
 async def stuck_session_list_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,9 +135,9 @@ async def stuck_session_list_panel(update: Update, context: ContextTypes.DEFAULT
     if not sessions:
         text += "No stuck sessions found for this country\\."
     else:
-        from datetime import datetime
         for s in sessions:
-            reg_date = datetime.fromisoformat(s['reg_time']).strftime('%Y-%m-%d')
+            reg_date_dt = datetime.fromisoformat(s['reg_time']) if isinstance(s['reg_time'], str) else s['reg_time']
+            reg_date = reg_date_dt.strftime('%Y-%m-%d')
             text += f"📱 `{escape_markdown(s['phone_number'])}`\n"
             text += f"  ├─ User ID: `{s['user_id']}`\n"
             text += f"  └─ Added: `{escape_markdown(reg_date)}`\n\n"
@@ -155,42 +151,51 @@ async def stuck_session_list_panel(update: Update, context: ContextTypes.DEFAULT
 
 @admin_required
 async def force_confirm_session(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handler for the 'Force Confirm' button."""
+    """Handler for the 'Force Confirm' button. Re-schedules the initial check."""
     query = update.callback_query
     admin_user_id = update.effective_user.id
+    config = get_config()
     
     parts = query.data.split(':')[-1].split('_')
     account_id = int(parts[0])
     page_to_return_to = int(parts[1])
 
-    await query.answer("Processing confirmation...")
+    await query.answer("Re-scheduling confirmation...")
 
     account = database.find_account_by_id(account_id)
     if not account or account['status'] != 'pending_confirmation':
         await query.message.reply_text("❌ This account is no longer stuck or has already been processed.", parse_mode=ParseMode.MARKDOWN_V2)
         return
 
-    # Call the reusable confirmation logic
-    await login.run_confirmation_check(context.bot, context.bot_data, account)
+    # Re-schedule the job to run immediately. This is the most robust way.
+    scheduler = context.application.bot_data["scheduler"]
+    scheduler.add_job(
+        login.schedule_initial_check,
+        'date',
+        run_date=datetime.now(timezone.utc) + timedelta(seconds=5),
+        args=[config.BOT_TOKEN, str(account['user_id']), account['user_id'], account['phone_number'], account['job_id'], None], # No message to edit
+        id=account['job_id'],
+        replace_existing=True,
+        misfire_grace_time=300
+    )
     
-    database.log_admin_action(admin_user_id, "FORCE_CONFIRM", f"Admin forced confirmation for account ID {account_id}")
+    database.log_admin_action(admin_user_id, "FORCE_CONFIRM", f"Admin re-scheduled confirmation for account ID {account_id}")
 
-    await query.message.reply_text(f"✅ Confirmation process triggered for `{escape_markdown(account['phone_number'])}`\\. The user will be notified of the result.", parse_mode=ParseMode.MARKDOWN_V2)
+    await query.message.reply_text(f"✅ Confirmation re-scheduled for `{escape_markdown(account['phone_number'])}`\\. The user will be notified of the result shortly.", parse_mode=ParseMode.MARKDOWN_V2)
     
     # Refresh the stuck list view
-    context.user_data['sv_country_code'] = next((c['code'] for c in database.get_countries_config().values() if account['phone_number'].startswith(c['code'])), None)
-    query.data = f"admin_sv_stucklist:{context.user_data['sv_country_code']}_{page_to_return_to}"
-    await stuck_session_list_panel(update, context)
+    country_code_match = re.match(r'^(\+\d+)', account['phone_number'])
+    if country_code_match:
+        context.user_data['sv_country_code'] = country_code_match.group(1)
+        query.data = f"admin_sv_stucklist:{context.user_data['sv_country_code']}_{page_to_return_to}"
+        await stuck_session_list_panel(update, context)
 
 
-# --- Handler Registration ---
 def get_callback_handlers():
     return [
         CallbackQueryHandler(session_vault_main, pattern=r"^admin_sv_main$"),
         CallbackQueryHandler(country_status_panel, pattern=r"^admin_sv_country:"),
         CallbackQueryHandler(session_list_panel, pattern=r"^admin_sv_list:"),
-        # Add new handlers
         CallbackQueryHandler(stuck_session_list_panel, pattern=r"^admin_sv_stucklist:"),
         CallbackQueryHandler(force_confirm_session, pattern=r"^admin_sv_forceconfirm:"),
     ]
-# END OF FILE handlers/admin/session_vault.py

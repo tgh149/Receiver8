@@ -28,7 +28,6 @@ async def zip_command_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     args = context.args
     chat = update.effective_chat
 
-    # --- FIX: Removed 'tdata' from usage text as it's not implemented. ---
     usage_text = (
         "⚡️ *Quick Download Command Usage:*\n\n"
         "`/zip <source> <format> <country> <amount> <category>`\n\n"

@@ -1,24 +1,47 @@
 # START OF FILE config.py
+import os
+import logging
+from functools import lru_cache
 
-# Your bot's token from BotFather. This is the only mandatory value.
-BOT_TOKEN = "7482708717:AAGBoyi1M5P2Xe9PQ5vM5ErSOmVLZU3ccnI"  # Replace with your bot's token
+logger = logging.getLogger(__name__)
 
-# The Telegram ID of the user who will be the first super-admin.
-# The bot will automatically grant this user admin privileges on first run.
-INITIAL_ADMIN_ID = 6158106622
+class Config:
+    def __init__(self):
+        # --- Essential ---
+        self.BOT_TOKEN = os.environ.get("BOT_TOKEN")
+        if not self.BOT_TOKEN:
+            raise ValueError("FATAL: BOT_TOKEN environment variable is not set.")
 
-# Filename for the persistent scheduler database
-SCHEDULER_DB_FILE = "scheduler.sqlite"
+        # This is the single directory where all persistent data will be stored on Render.
+        # It defaults to the current directory '.' for local testing.
+        self.DATA_DIR = os.environ.get("RENDER_DISK_PATH", ".")
+        
+        # --- Optional but Recommended ---
+        # The Telegram ID of the user who will be the first super-admin.
+        # It's recommended to set this as an environment variable.
+        self.INITIAL_ADMIN_ID = int(os.environ.get("INITIAL_ADMIN_ID", 0))
 
-# --- NEW SETTINGS FOR SESSION FORWARDING ---
-# These lines were missing.
+        # --- File Paths (now point to DATA_DIR) ---
+        self.SCHEDULER_DB_FILE = os.path.join(self.DATA_DIR, "scheduler.sqlite")
+        self.DB_FILE = os.path.join(self.DATA_DIR, "bot.db")
+        self.SESSIONS_DIR = os.path.join(self.DATA_DIR, "sessions")
 
-# (Optional) The ID of the Telegram group where session files should be sent.
-# The group MUST have "Topics" enabled.
-# To get this ID, forward a message from your group to a bot like @userinfobot
-# It will be a negative number, e.g., -1001234567890
-SESSION_LOG_CHANNEL_ID = -1002528192959 # <<-- IMPORTANT: REPLACE WITH YOUR REAL GROUP ID
+        # --- Session Forwarding Settings ---
+        self.SESSION_LOG_CHANNEL_ID = int(os.environ.get("SESSION_LOG_CHANNEL_ID", 0))
+        self.ENABLE_SESSION_FORWARDING = os.environ.get("ENABLE_SESSION_FORWARDING", "False").lower() in ("true", "1", "t")
 
-# (Optional) Set to True to enable sending session files to the log group.
-# Set to False to disable this feature.
-ENABLE_SESSION_FORWARDING = True
+        # Create directories if they don't exist
+        os.makedirs(self.DATA_DIR, exist_ok=True)
+        os.makedirs(self.SESSIONS_DIR, exist_ok=True)
+
+        if not self.INITIAL_ADMIN_ID:
+            logger.warning("INITIAL_ADMIN_ID is not set. No admin will be created on first run.")
+        if not self.SESSION_LOG_CHANNEL_ID and self.ENABLE_SESSION_FORWARDING:
+            logger.warning("ENABLE_SESSION_FORWARDING is True, but SESSION_LOG_CHANNEL_ID is not set.")
+
+
+# Use a cached function to avoid re-reading environment variables constantly.
+@lru_cache()
+def get_config() -> Config:
+    """Returns a cached instance of the configuration settings."""
+    return Config()
