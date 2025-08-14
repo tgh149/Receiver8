@@ -75,7 +75,7 @@ async def withdrawal_list_panel(update: Update, context: ContextTypes.DEFAULT_TY
             ts = datetime.fromisoformat(w['timestamp']).strftime('%d-%b-%y %H:%M')
             username = escape_markdown(w.get('username') or f"ID:{w['user_id']}")
             text += f"{emoji} *@{username}* \\(`{w['user_id']}`\\)\n"
-            text += f"  └─ Amount: `${escape_markdown(f"{w['amount']:.2f}")}`\n"
+            text += f"  └─ Amount: $${escape_markdown(f"{w['amount']:.2f}")}`\n"
             text += f"  └─ Address: `{escape_markdown(w['address'])}`\n"
             text += f"  └─ Date: `{escape_markdown(ts)}`\n"
             if w.get('rejection_reason'):
